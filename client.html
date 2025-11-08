@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebTransport Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status.disconnected {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+        .status.connected {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            background-color: #1976d2;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #1565c0;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        input[type="text"] {
+            padding: 10px;
+            width: 60%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .messages {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            height: 300px;
+            overflow-y: auto;
+        }
+        .message {
+            padding: 5px;
+            margin: 5px 0;
+            border-radius: 3px;
+        }
+        .message.sent {
+            background-color: #e3f2fd;
+            text-align: right;
+        }
+        .message.received {
+            background-color: #f1f8e9;
+        }
+        .message.system {
+            background-color: #fff3e0;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebTransport Test Client</h1>
+
+        <div id="status" class="status disconnected">
+            Status: Disconnected
+        </div>
+
+        <div class="controls">
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        </div>
+
+        <div class="controls">
+            <input type="text" id="messageInput" placeholder="Enter message..." onkeypress="handleKeyPress(event)">
+            <button id="sendStreamBtn" onclick="sendViaStream()" disabled>Send via Stream</button>
+            <button id="sendDatagramBtn" onclick="sendViaDatagram()" disabled>Send via Datagram</button>
+        </div>
+
+        <div class="messages" id="messages"></div>
+    </div>
+
+    <script>
+        let transport = null;
+        let currentStream = null;
+        let streamWriter = null;
+        let streamReader = null;
+
+        function addMessage(text, type = 'system') {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            messageDiv.textContent = text;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function updateStatus(connected) {
+            const statusDiv = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const sendStreamBtn = document.getElementById('sendStreamBtn');
+            const sendDatagramBtn = document.getElementById('sendDatagramBtn');
+
+            if (connected) {
+                statusDiv.textContent = 'Status: Connected';
+                statusDiv.className = 'status connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                sendStreamBtn.disabled = false;
+                sendDatagramBtn.disabled = false;
+            } else {
+                statusDiv.textContent = 'Status: Disconnected';
+                statusDiv.className = 'status disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                sendStreamBtn.disabled = true;
+                sendDatagramBtn.disabled = true;
+            }
+        }
+
+        async function connect() {
+            try {
+                addMessage('Connecting to WebTransport server...');
+
+                // Self-signed certificate hash for local development
+                const url = 'https://localhost:8765';
+
+                // Certificate hash (SHA-256) - ECDSA cert with prime256v1
+                const certHash = 'dbecff3c052db73b98936dc11ebce78bafe3d70044243835ed221f091ee0fea7';
+                const hashBytes = new Uint8Array(certHash.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+
+                transport = new WebTransport(url, {
+                    serverCertificateHashes: [{
+                        algorithm: "sha-256",
+                        value: hashBytes
+                    }]
+                });
+
+                await transport.ready;
+                addMessage('Connected successfully!');
+                updateStatus(true);
+
+                // Open a bidirectional stream for communication
+                currentStream = await transport.createBidirectionalStream();
+                streamWriter = currentStream.writable.getWriter();
+                streamReader = currentStream.readable.getReader();
+
+                // Start reading from the stream
+                readStream();
+
+                // Listen for incoming datagrams
+                readDatagrams();
+
+            } catch (error) {
+                addMessage(`Connection failed: ${error.message}`);
+                console.error('Connection error:', error);
+                updateStatus(false);
+            }
+        }
+
+        async function readStream() {
+            try {
+                const decoder = new TextDecoder();
+                while (true) {
+                    const { value, done } = await streamReader.read();
+                    if (done) {
+                        addMessage('Stream closed by server');
+                        break;
+                    }
+                    const message = decoder.decode(value);
+                    addMessage(message, 'received');
+                }
+            } catch (error) {
+                console.error('Stream read error:', error);
+            }
+        }
+
+        async function readDatagrams() {
+            try {
+                const decoder = new TextDecoder();
+                const reader = transport.datagrams.readable.getReader();
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        addMessage('Datagram reader closed');
+                        break;
+                    }
+                    const message = decoder.decode(value);
+                    addMessage(`[Datagram] ${message}`, 'received');
+                }
+            } catch (error) {
+                console.error('Datagram read error:', error);
+            }
+        }
+
+        async function sendViaStream() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+
+            if (!message || !streamWriter) {
+                return;
+            }
+
+            try {
+                const encoder = new TextEncoder();
+                await streamWriter.write(encoder.encode(message));
+                addMessage(message, 'sent');
+                input.value = '';
+            } catch (error) {
+                addMessage(`Failed to send: ${error.message}`);
+                console.error('Send error:', error);
+            }
+        }
+
+        async function sendViaDatagram() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+
+            if (!message || !transport) {
+                return;
+            }
+
+            try {
+                const encoder = new TextEncoder();
+                const writer = transport.datagrams.writable.getWriter();
+                await writer.write(encoder.encode(message));
+                writer.releaseLock();
+                addMessage(`[Datagram] ${message}`, 'sent');
+                input.value = '';
+            } catch (error) {
+                addMessage(`Failed to send datagram: ${error.message}`);
+                console.error('Datagram send error:', error);
+            }
+        }
+
+        function disconnect() {
+            if (transport) {
+                transport.close();
+                transport = null;
+                currentStream = null;
+                streamWriter = null;
+                streamReader = null;
+                addMessage('Disconnected');
+                updateStatus(false);
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendViaStream();
+            }
+        }
+
+        // Initial message
+        addMessage('Click "Connect" to establish WebTransport connection');
+        addMessage('Using certificate pinning for secure self-signed certificate connection');
+    </script>
+</body>
+</html>

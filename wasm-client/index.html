@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WASM WebTransport Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        .badge {
+            display: inline-block;
+            background-color: #ff9800;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status.disconnected {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+        .status.connected {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            background-color: #1976d2;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #1565c0;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        input[type="text"] {
+            padding: 10px;
+            width: 60%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .messages {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            height: 300px;
+            overflow-y: auto;
+        }
+        .message {
+            padding: 5px;
+            margin: 5px 0;
+            border-radius: 3px;
+        }
+        .message.sent {
+            background-color: #e3f2fd;
+            text-align: right;
+        }
+        .message.received {
+            background-color: #f1f8e9;
+        }
+        .message.system {
+            background-color: #fff3e0;
+            font-style: italic;
+        }
+        .info {
+            background-color: #e3f2fd;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>
+            WASM WebTransport Client
+            <span class="badge">Rust + WASM</span>
+        </h1>
+
+        <div class="info">
+            This client is written in <strong>Rust</strong>, compiled to <strong>WebAssembly</strong>,
+            and uses the <strong>web-transport</strong> crate to connect to the server.
+        </div>
+
+        <div id="status" class="status disconnected">
+            Status: Disconnected
+        </div>
+
+        <div class="controls">
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        </div>
+
+        <div class="controls">
+            <input type="text" id="messageInput" placeholder="Enter message..." onkeypress="handleKeyPress(event)">
+            <button id="sendStreamBtn" onclick="sendMessageStream()" disabled>Send via Stream</button>
+            <button id="sendDatagramBtn" onclick="sendMessageDatagram()" disabled>Send via Datagram</button>
+        </div>
+
+        <div class="messages" id="messages"></div>
+    </div>
+
+    <script type="module">
+        import init, { connect_to_server, update_status, send_message_stream, send_message_datagram, disconnect as wasm_disconnect } from './pkg/wasm_client.js';
+
+        let connected = false;
+
+        async function run() {
+            await init();
+            console.log('WASM module loaded');
+            addMessage('WASM module loaded successfully', 'system');
+            addMessage('Click Connect to establish WebTransport connection', 'system');
+            addMessage('Using Rust compiled to WASM with web-transport crate', 'system');
+        }
+
+        window.connect = async function() {
+            try {
+                update_status(false);
+                await connect_to_server('https://localhost:8765');
+                update_status(true);
+                connected = true;
+            } catch (e) {
+                console.error('Connection error:', e);
+                addMessage(`Connection error: ${e}`, 'system');
+                update_status(false);
+            }
+        };
+
+        window.disconnect = async function() {
+            await wasm_disconnect();
+            connected = false;
+            update_status(false);
+        };
+
+        window.sendMessageStream = async function() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            try {
+                await send_message_stream(message);
+                input.value = '';
+            } catch (e) {
+                console.error('Send error:', e);
+                addMessage(`Send error: ${e}`, 'system');
+            }
+        };
+
+        window.sendMessageDatagram = async function() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            try {
+                await send_message_datagram(message);
+                input.value = '';
+            } catch (e) {
+                console.error('Send datagram error:', e);
+                addMessage(`Send datagram error: ${e}`, 'system');
+            }
+        };
+
+        window.handleKeyPress = function(event) {
+            if (event.key === 'Enter') {
+                sendMessageStream();
+            }
+        };
+
+        function addMessage(text, type) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            messageDiv.textContent = text;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        run();
+    </script>
+</body>
+</html>

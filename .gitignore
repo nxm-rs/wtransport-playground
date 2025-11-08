@@ -1,0 +1,29 @@
+# Rust
+/target
+**/target
+Cargo.lock
+
+# WASM
+**/pkg
+
+# Certificates - NEVER commit private keys or certificates
+*.pem
+*.key
+*.crt
+*.der
+cert.conf
+
+# Nix
+result
+.direnv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
