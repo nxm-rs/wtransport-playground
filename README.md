@@ -28,7 +28,7 @@ L = City
 O = Organization
 CN = localhost
 [v3_req]
-keyUsage = keyEncipherment, dataEncipherment
+keyUsage = digitalSignature
 extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 [alt_names]
